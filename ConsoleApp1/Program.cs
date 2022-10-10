@@ -17,11 +17,10 @@ IHost host = Host.CreateDefaultBuilder(args)
         {
             bus.UsingRabbitMq((context, cfg) =>
             {
-                cfg.Host("localhost", "/", h =>
+                cfg.Host(config.GetSection("QueueManager:Url").Value, config.GetSection("QueueManager:VirtualHost").Value, h =>
                 {
-                    h.Username("guest");
-                    h.Password("guest");
-
+                    h.Username(config.GetSection("QueueManager:User").Value);
+                    h.Password(config.GetSection("QueueManager:Password").Value);
                 });
                 cfg.ReceiveEndpoint(config.GetSection("Queues:InputQueue").Value, cfg =>
                 {
@@ -32,10 +31,10 @@ IHost host = Host.CreateDefaultBuilder(args)
             bus.AddSagaStateMachine<OrderMaestoStateMachineNew, OrderProcessState>()
                 .MongoDbRepository(repo =>
                 {
-                    repo.Connection = "mongodb://root:m0ng0_r00t@localhost:27017";
-                    repo.DatabaseName = "OrderProcess";
+                    repo.Connection = config.GetSection("MongoDB:Url").Value;
+                    repo.DatabaseName = config.GetSection("MongoDB:Database").Value;
 
-                    repo.CollectionName = "orders";
+                    repo.CollectionName = config.GetSection("MongoDB:Collection").Value;
                 });
         });
     })

@@ -28,7 +28,7 @@ namespace OrderMaestro.Services
                     .Then(c => Console.WriteLine($"Pedido {c.Message.CorrelationId} recebido"))
                     .IfElse(x => x.Message.Order.Items.Any(i => i.Product.Type == ProductType.Fisical), cmd => cmd.ThenAsync(c => SendCommand<IReserveStock>("Queues:Warehouse", c)),
                         cmdElse => cmdElse.ThenAsync(c => SendCommand<IProcessPayment>("Queues:Payment", c)).TransitionTo(OrderAccepted)),
-                    
+
                 When(StockReserved)
                     .Then(c => UpdateSagaState(c.Saga, c.Message.Order))
                         .Then(c => Console.WriteLine($"Solicitação de itens para o pedido {c.Message.CorrelationId} recebido"))
@@ -40,9 +40,10 @@ namespace OrderMaestro.Services
                 When(PaymentProcessed)
                     .Then(c => UpdateSagaState(c.Saga, c.Message.Order))
                     .Then(c => Console.WriteLine($"Processamento do pagamento para pedido {c.Message.CorrelationId} recebido"))
-                    .IfElse(x => x.Message.Order.Items.Any(i => i.Product.HasRoyaltiesFees), 
+                    .IfElse(x => x.Message.Order.Items.Any(i => i.Product.HasRoyaltiesFees),
                         cmd => cmd.Then(async c => await SendCommand<IProcessRoyalties>("Queues:RoyaltiesFee", c)),
-                        elseCmd =>  elseCmd.Then(async c => {
+                        elseCmd => elseCmd.Then(async c =>
+                        {
                             await Task.Delay(2000);
                             c.Message.Order.Status = Status.RoyaltiesProcessed;
                             await PublishMessage<IRoyaltiesProcessed>(c);
@@ -52,11 +53,12 @@ namespace OrderMaestro.Services
                     .Then(c => Console.WriteLine($"Processamento dos Direitos Autorais para pedido {c.Message.CorrelationId} recebido"))
                     .IfElse(x => x.Message.Order.Items.Any(i => i.Product.CommisionPercentage > 0),
                         cmd => cmd.Then(async c => await SendCommand<IProcessCommission>("Queues:Payroll", c)),
-                        elseCmd => elseCmd.Then(async c => {
+                        elseCmd => elseCmd.Then(async c =>
+                        {
                             await Task.Delay(2000);
                             c.Message.Order.Status = Status.CommisionProcessed;
                             await PublishMessage<ICommissionProcessed>(c);
-                        } )),
+                        })),
                 When(CommisionProcessed)
                     .Then(c => UpdateSagaState(c.Saga, c.Message.Order))
                     .Then(c => Console.WriteLine($"Processamento da Comissão para pedido {c.Message.CorrelationId} recebido"))
@@ -84,7 +86,7 @@ namespace OrderMaestro.Services
                     .Then(c => Console.WriteLine($"Pedido {c.Message.CorrelationId} enviado."))
                     .Publish(c => new OrderProcessed(c.Message.CorrelationId, c.Message.Order))
                     .Finalize()
-            );            
+            );
 
 
             SetCompletedWhenFinalized();
@@ -102,12 +104,13 @@ namespace OrderMaestro.Services
 
         private async Task PublishMessage<TMessage>(BehaviorContext<OrderProcessState, IMessage> context)
             where TMessage : class, IMessage
-        {   await context.Publish<TMessage>(new
+        {
+            await context.Publish<TMessage>(new
             {
                 CorrelationId = context.Message.CorrelationId,
                 Order = context.Message.Order
             });
-            
+
         }
 
 
@@ -128,7 +131,7 @@ namespace OrderMaestro.Services
             Event(() => RoyaltiesProcessed, action => action.CorrelateById(ctx => ctx.Message.CorrelationId));
             Event(() => SubscriptionActivated, action => action.CorrelateById(ctx => ctx.Message.CorrelationId));
         }
-        
+
         public Event<IOrderSubmitted>? OrderSubmitted { get; private set; }
         public Event<IOrderShipped>? OrderShipped { get; set; }
         public Event<IPaymentProcessed>? PaymentProcessed { get; private set; }

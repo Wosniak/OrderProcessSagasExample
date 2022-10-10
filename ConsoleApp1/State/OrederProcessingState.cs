@@ -17,6 +17,6 @@ namespace OrderMaestro.State
         public Guid CorrelationId { get; set; }
 
         public string State { get; set; }
-        public int Version { get; set; }       
+        public int Version { get; set; }
     }
 }

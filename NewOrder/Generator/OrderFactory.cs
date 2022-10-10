@@ -36,11 +36,11 @@ namespace NewOrder.Generator
             {
                 SKU = sku,
                 Bunddle = false,
-                CommisionPercentage = 0,//(decimal)(GetRandom(0, 1500) / 100.00),
+                CommisionPercentage = (decimal)(GetRandom(0, 1500) / 100.00),
                 Description = $"Produto {sku}",
-                HasRoyaltiesFees = false,
+                HasRoyaltiesFees = true,
                 Price = (decimal)(GetRandom(100, 100000) / 100.00),
-                Type =  sku%2==0 ? ProductType.Fisical : ProductType.Subscription
+                Type = sku % 2 == 0 ? ProductType.Fisical : ProductType.Subscription
             };
         }
 

@@ -31,7 +31,7 @@ namespace OrderMaestro.Services
         private EventActivityBinder<OrderProcessState, IOrderSubmitted> SetOrderSummitedHandler() =>
             When(OrderSubmitted).Then(c => UpdateSagaState(c.Saga, c.Message.Order))
                                 .Then(c => Console.WriteLine($"Pedido {c.Message.CorrelationId} recebido"))
-                                .IfElse(x => x.Message.Order.Items.Any(i => i.Product.Type == ProductType.Fisical), cmd => cmd.ThenAsync(c => SendCommand<IReserveStock>("Queues:Warehouse", c)), 
+                                .IfElse(x => x.Message.Order.Items.Any(i => i.Product.Type == ProductType.Fisical), cmd => cmd.ThenAsync(c => SendCommand<IReserveStock>("Queues:Warehouse", c)),
                                                 cmdElse => cmdElse.ThenAsync(c => SendCommand<IProcessPayment>("Queues:Payment", c)))
                                 .TransitionTo(Processing);
 
@@ -42,13 +42,13 @@ namespace OrderMaestro.Services
 
         private EventActivityBinder<OrderProcessState, IPaymentProcessed> SetPaymentProcessedHandler() =>
             When(PaymentProcessed).Then(c => UpdateSagaState(c.Saga, c.Message.Order))
-                                  .Then(c => Console.WriteLine($"Processamento do pagamento para pedido {c.Message.CorrelationId} recebido"))            
+                                  .Then(c => Console.WriteLine($"Processamento do pagamento para pedido {c.Message.CorrelationId} recebido"))
                                   .If(x => x.Message.Order.Items.Any(i => i.Product.HasRoyaltiesFees), cmd => cmd.Then(async c => await SendCommand<IProcessRoyalties>("Queues:RoyaltiesFee", c)))
-                                  .If(x => x.Message.Order.Items.Any(i => i.Product.CommisionPercentage > 0), cmd => cmd.Then(async c =>  await SendCommand<IProcessCommission>("Queues:PayRoll", c)))
+                                  .If(x => x.Message.Order.Items.Any(i => i.Product.CommisionPercentage > 0), cmd => cmd.Then(async c => await SendCommand<IProcessCommission>("Queues:PayRoll", c)))
                                   .If(x => x.Message.Order.Items.Any(i => i.Product.Type == ProductType.Fisical), cmd => cmd.ThenAsync(c => SendCommand<IShipOrder>("Queues:Shipment", c)))
                                   .If(x => x.Message.Order.Items.Any(i => i.Product.Type == ProductType.Subscription), cmd => cmd.ThenAsync(c => SendCommand<IManageSubscription>("Queues:Subscription", c)))
                                   .TransitionTo(OrderPayed);
-               
+
 
         private EventActivityBinder<OrderProcessState, ICommissionProcessed> SetCommisionProcessedHandler() =>
            When(CommisionProcessed).Then(c => Console.WriteLine($"Processamento do pagamento de comissão para pedido {c.Message.CorrelationId} recebido"));

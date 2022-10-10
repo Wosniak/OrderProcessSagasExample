@@ -18,16 +18,16 @@ IHost host = Host.CreateDefaultBuilder(args)
         {
             bus.UsingRabbitMq((context, cfg) =>
             {
-                cfg.Host("localhost", "/", h =>
+                cfg.Host(config.GetSection("QueueManager:Url").Value, config.GetSection("QueueManager:VirtualHost").Value, h =>
                 {
-                    h.Username("guest");
-                    h.Password("guest");
+                    h.Username(config.GetSection("QueueManager:User").Value);
+                    h.Password(config.GetSection("QueueManager:Password").Value);
                 });
                 cfg.ReceiveEndpoint(config.GetSection("Queues:InputQueue").Value, cfg =>
                 {
                     cfg.ConfigureConsumer<OrderProcessedConsumer>(context);
                 });
-                
+
             });
             bus.AddConsumer<OrderProcessedConsumer>();
 
@@ -50,10 +50,11 @@ await host.StartAsync();
 
 var continueRunning = true;
 
-Console.CancelKeyPress += new ConsoleCancelEventHandler((sender, args) => {
+Console.CancelKeyPress += new ConsoleCancelEventHandler((sender, args) =>
+{
     args.Cancel = true;
-continueRunning = false;
-}) ;
+    continueRunning = false;
+});
 
 using IServiceScope serviceScope = host.Services.CreateScope();
 
