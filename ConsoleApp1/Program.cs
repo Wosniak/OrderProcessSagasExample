@@ -29,7 +29,7 @@ IHost host = Host.CreateDefaultBuilder(args)
                 });
 
             });
-            bus.AddSagaStateMachine<OrderMaestoStateMachine, OrderProcessState>()
+            bus.AddSagaStateMachine<OrderMaestoStateMachineNew, OrderProcessState>()
                 .MongoDbRepository(repo =>
                 {
                     repo.Connection = "mongodb://root:m0ng0_r00t@localhost:27017";

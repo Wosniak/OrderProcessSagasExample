@@ -10,78 +10,85 @@ using OrderMaestro.State;
 
 namespace OrderMaestro.Services
 {
-    internal class OrderMaestoStateMachine : MassTransitStateMachine<OrderProcessState>
+    internal class OrderMaestoStateMachineNew : MassTransitStateMachine<OrderProcessState>
     {
         private readonly ILogger<OrderMaestoStateMachine> _logger;
         private readonly IConfiguration _configuration;
-        public OrderMaestoStateMachine(ILogger<OrderMaestoStateMachine> logger, IConfiguration configuration)
+        public OrderMaestoStateMachineNew(ILogger<OrderMaestoStateMachine> logger, IConfiguration configuration)
         {
             _logger = logger;
             _configuration = configuration;
 
             InstanceState(instance => instance.State);
-            State(() => Processing);
             ConfigurCorrelateIds();
-            Initially(SetOrderSummitedHandler());
-            During(Processing, SetStockReservedHandler(), SetPaymentProcessedHandler(), SetCommisionProcessedHandler(), SetRoyaltiesProcessedHandler(), SetSubscriptionAcivatedOrderHandler(), SetOrderShippedHandler());
+
+            Initially(
+                When(OrderSubmitted)
+                    .Then(c => UpdateSagaState(c.Saga, c.Message.Order))
+                    .Then(c => Console.WriteLine($"Pedido {c.Message.CorrelationId} recebido"))
+                    .IfElse(x => x.Message.Order.Items.Any(i => i.Product.Type == ProductType.Fisical), cmd => cmd.ThenAsync(c => SendCommand<IReserveStock>("Queues:Warehouse", c)),
+                        cmdElse => cmdElse.ThenAsync(c => SendCommand<IProcessPayment>("Queues:Payment", c)).TransitionTo(OrderAccepted)),
+                    
+                When(StockReserved)
+                    .Then(c => UpdateSagaState(c.Saga, c.Message.Order))
+                        .Then(c => Console.WriteLine($"Solicitação de itens para o pedido {c.Message.CorrelationId} recebido"))
+                        .ThenAsync(c => SendCommand<IProcessPayment>("Queues:Payment", c)).TransitionTo(OrderAccepted)
+                );
+
+
+            During(OrderAccepted,
+                When(PaymentProcessed)
+                    .Then(c => UpdateSagaState(c.Saga, c.Message.Order))
+                    .Then(c => Console.WriteLine($"Processamento do pagamento para pedido {c.Message.CorrelationId} recebido"))
+                    .IfElse(x => x.Message.Order.Items.Any(i => i.Product.HasRoyaltiesFees), 
+                        cmd => cmd.Then(async c => await SendCommand<IProcessRoyalties>("Queues:RoyaltiesFee", c)),
+                        elseCmd =>  elseCmd.Then(async c => {
+                            await Task.Delay(2000);
+                            c.Message.Order.Status = Status.RoyaltiesProcessed;
+                            await PublishMessage<IRoyaltiesProcessed>(c);
+                        })),
+                When(RoyaltiesProcessed)
+                    .Then(c => UpdateSagaState(c.Saga, c.Message.Order))
+                    .Then(c => Console.WriteLine($"Processamento dos Direitos Autorais para pedido {c.Message.CorrelationId} recebido"))
+                    .IfElse(x => x.Message.Order.Items.Any(i => i.Product.CommisionPercentage > 0),
+                        cmd => cmd.Then(async c => await SendCommand<IProcessCommission>("Queues:Payroll", c)),
+                        elseCmd => elseCmd.Then(async c => {
+                            await Task.Delay(2000);
+                            c.Message.Order.Status = Status.CommisionProcessed;
+                            await PublishMessage<ICommissionProcessed>(c);
+                        } )),
+                When(CommisionProcessed)
+                    .Then(c => UpdateSagaState(c.Saga, c.Message.Order))
+                    .Then(c => Console.WriteLine($"Processamento da Comissão para pedido {c.Message.CorrelationId} recebido"))
+                    .If(x => x.Message.Order.Items.Any(i => i.Product.Type == ProductType.Fisical), cmd => cmd.ThenAsync(c => SendCommand<IShipOrder>("Queues:Shipment", c)))
+                    .If(x => x.Message.Order.Items.Any(i => i.Product.Type == ProductType.Subscription), cmd => cmd.ThenAsync(c => SendCommand<IManageSubscription>("Queues:Subscription", c)))
+                    .TransitionTo(OrderReady)
+                );
+
+            During(OrderReady,
+                When(SubscriptionActivated)
+                    .Then(c =>
+                    {
+                        this.UpdateSagaState(c.Saga, c.Message.Order);
+                        c.Saga.Order.Status = Status.Processed;
+                    })
+                    .Then(c => Console.WriteLine($"Assinatura do pedido {c.Message.CorrelationId} processada."))
+                    .Publish(c => new OrderProcessed(c.Message.CorrelationId, c.Message.Order))
+                    .Finalize(),
+                When(OrderShipped)
+                    .Then(c =>
+                    {
+                        this.UpdateSagaState(c.Saga, c.Message.Order);
+                        c.Saga.Order.Status = Status.Processed;
+                    })
+                    .Then(c => Console.WriteLine($"Pedido {c.Message.CorrelationId} enviado."))
+                    .Publish(c => new OrderProcessed(c.Message.CorrelationId, c.Message.Order))
+                    .Finalize()
+            );            
+
+
             SetCompletedWhenFinalized();
         }
-
-        private EventActivityBinder<OrderProcessState, IOrderSubmitted> SetOrderSummitedHandler() =>
-            When(OrderSubmitted).Then(c => UpdateSagaState(c.Saga, c.Message.Order))
-                                .Then(c => Console.WriteLine($"Pedido {c.Message.CorrelationId} recebido"))
-                                .IfElse(x => x.Message.Order.Items.Any(i => i.Product.Type == ProductType.Fisical), cmd => cmd.ThenAsync(c => SendCommand<IReserveStock>("Queues:Warehouse", c)), 
-                                                cmdElse => cmdElse.ThenAsync(c => SendCommand<IProcessPayment>("Queues:Payment", c)))
-                                .TransitionTo(Processing);
-
-
-        private EventActivityBinder<OrderProcessState, IStockReserved> SetStockReservedHandler() =>
-            When(StockReserved).Then(c => UpdateSagaState(c.Saga, c.Message.Order))
-                               .Then(c => Console.WriteLine($"Solicitação de itens para o pedido {c.Message.CorrelationId} recebido"))
-                               .ThenAsync(c => SendCommand<IProcessPayment>("Queues:Payment", c));
-
-
-
-        private EventActivityBinder<OrderProcessState, IPaymentProcessed> SetPaymentProcessedHandler() =>
-            When(PaymentProcessed).Then(c => UpdateSagaState(c.Saga, c.Message.Order))
-                                  .Then(c => Console.WriteLine($"Processamento do pagamento para pedido {c.Message.CorrelationId} recebido"))            
-                                  .If(x => x.Message.Order.Items.Any(i => i.Product.HasRoyaltiesFees), cmd => cmd.ThenAsync(c => SendCommand<IProcessRoyalties>("Queues:RoyaltiesFee", c)))
-                                  .If(x => x.Message.Order.Items.Any(i => i.Product.CommisionPercentage > 0), cmd => cmd.ThenAsync(c =>  SendCommand<IProcessCommission>("Queues:PayRoll", c)))
-                                  .If(x => x.Message.Order.Items.Any(i => i.Product.Type == ProductType.Fisical), cmd => cmd.ThenAsync(c => SendCommand<IShipOrder>("Queues:Shipment", c)))
-                                  .If(x => x.Message.Order.Items.Any(i => i.Product.Type == ProductType.Subscription), cmd => cmd.ThenAsync(c => SendCommand<IManageSubscription>("Queues:Subscription", c)));
-
-
-        private EventActivityBinder<OrderProcessState, ICommissionProcessed> SetCommisionProcessedHandler() =>
-           When(CommisionProcessed).Then(c => UpdateSagaState(c.Saga, c.Message.Order))
-                                 .Then(c => Console.WriteLine($"Processamento do pagamento de comissão para pedido {c.Message.CorrelationId} recebido"));
-
-
-        private EventActivityBinder<OrderProcessState, IRoyaltiesProcessed> SetRoyaltiesProcessedHandler() =>
-           When(RoyaltiesProcessed).Then(c => UpdateSagaState(c.Saga, c.Message.Order))
-                                 .Then(c => Console.WriteLine($"Processamento do pagamento de royalties para pedido {c.Message.CorrelationId} recebido"));
-                                 
-
-
-        private EventActivityBinder<OrderProcessState, ISubscriptionActivated> SetSubscriptionAcivatedOrderHandler() =>
-           When(SubscriptionActivated).Then(c =>
-           {
-               this.UpdateSagaState(c.Saga, c.Message.Order);
-               c.Saga.Order.Status = Status.Processed;
-           })
-            .Then(c => Console.WriteLine($"Assinatura do pedido {c.Message.CorrelationId} processada."))
-           .Publish(c => new OrderProcessed(c.Message.CorrelationId, c.Message.Order))
-           .Finalize();
-
-        private EventActivityBinder<OrderProcessState, IOrderShipped> SetOrderShippedHandler() =>
-            When(OrderShipped).Then(c =>
-            {
-                this.UpdateSagaState(c.Saga, c.Message.Order);
-                c.Saga.Order.Status = Status.Processed;
-            })
-            .Then(c => Console.WriteLine($"Pedido {c.Message.CorrelationId} enviado."))
-            .Publish(c => new OrderProcessed(c.Message.CorrelationId, c.Message.Order))
-            .Finalize();
-
         private async Task SendCommand<TCommand>(string endpointKey, BehaviorContext<OrderProcessState, IMessage> context)
             where TCommand : class, IMessage
         {
@@ -92,6 +99,17 @@ namespace OrderMaestro.Services
                 Order = context.Message.Order
             });
         }
+
+        private async Task PublishMessage<TMessage>(BehaviorContext<OrderProcessState, IMessage> context)
+            where TMessage : class, IMessage
+        {   await context.Publish<TMessage>(new
+            {
+                CorrelationId = context.Message.CorrelationId,
+                Order = context.Message.Order
+            });
+            
+        }
+
 
         private void UpdateSagaState(OrderProcessState state, Order order)
         {
@@ -110,7 +128,7 @@ namespace OrderMaestro.Services
             Event(() => RoyaltiesProcessed, action => action.CorrelateById(ctx => ctx.Message.CorrelationId));
             Event(() => SubscriptionActivated, action => action.CorrelateById(ctx => ctx.Message.CorrelationId));
         }
-        public MassTransit.State? Processing { get; private set; }
+        
         public Event<IOrderSubmitted>? OrderSubmitted { get; private set; }
         public Event<IOrderShipped>? OrderShipped { get; set; }
         public Event<IPaymentProcessed>? PaymentProcessed { get; private set; }
@@ -120,5 +138,11 @@ namespace OrderMaestro.Services
         public Event<ICommissionProcessed>? CommisionProcessed { get; private set; }
         public Event<IRoyaltiesProcessed>? RoyaltiesProcessed { get; private set; }
 
+        public MassTransit.State? Processing { get; private set; }
+        public MassTransit.State? OrderPayed { get; private set; }
+
+        public MassTransit.State OrderAccepted { get; private set; }
+        public MassTransit.State OrderReady { get; private set; }
+        public MassTransit.State LegalObligations { get; private set; }
     }
 }
